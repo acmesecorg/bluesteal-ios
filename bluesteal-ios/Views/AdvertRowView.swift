@@ -1,32 +1,13 @@
 //
 //  AdvertRowView.swift
-//  bluesteal
+//  bluesteal-ios
 //
 
 import SwiftUI
 import CoreBluetooth
 
-enum AdvertSource {
-    case local        // observed by our own CoreBluetooth scanner
-    case relay        // received over the WebRTC data channel from a paired peer
-
-    var symbol: String {
-        switch self {
-        case .local: return "dot.radiowaves.left.and.right"
-        case .relay: return "arrow.down.forward.circle.fill"
-        }
-    }
-    var tint: Color {
-        switch self {
-        case .local: return .secondary
-        case .relay: return .purple
-        }
-    }
-}
-
 struct AdvertRowView: View {
     let advert: CableAdvert
-    var source: AdvertSource = .local
     @State private var expanded = false
 
     private static let timeFormatter: DateFormatter = {
@@ -69,11 +50,10 @@ struct AdvertRowView: View {
             .padding(.leading, 8)
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: source.symbol)
+                Image(systemName: "dot.radiowaves.left.and.right")
                     .font(.caption)
-                    .foregroundStyle(source.tint)
+                    .foregroundStyle(.secondary)
                     .frame(width: 16, alignment: .center)
-                    .help(source == .relay ? "Received from paired peer" : "Locally scanned")
 
                 Text(Self.timeFormatter.string(from: advert.lastSeen))
                     .font(.system(.caption, design: .monospaced))
@@ -101,7 +81,6 @@ struct AdvertRowView: View {
             }
             .padding(.vertical, 2)
         }
-        .listRowBackground(source == .relay ? Color.purple.opacity(0.06) : Color.clear)
     }
 
     private var variantBadge: some View {

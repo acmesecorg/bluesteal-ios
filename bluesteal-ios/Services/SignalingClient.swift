@@ -1,27 +1,25 @@
 //
 //  SignalingClient.swift
-//  bluesteal
+//  bluesteal-ios
 //
 
 import Foundation
 import CocoaMQTT
 import CocoaMQTTWebSocket
 
-/// Thin MQTT wrapper that runs the ~5-second WebRTC pairing handshake over a
-/// public broker. Topics:
+/// Host-only MQTT wrapper that runs the WebRTC pairing handshake over a
+/// public broker. Topics (host perspective):
 ///
 ///   bluesteal/v1/<code>/offer        (retained — host publishes once)
-///   bluesteal/v1/<code>/answer       (peer publishes once)
+///   bluesteal/v1/<code>/answer       (peer publishes, host receives)
 ///   bluesteal/v1/<code>/ice/host     (host trickle ICE)
 ///   bluesteal/v1/<code>/ice/peer     (peer trickle ICE)
 ///   bluesteal/v1/<code>/bye          (either side announces close)
 ///
 /// Knows nothing about WebRTC; just emits `SignalingMessage`s up to whoever
-/// owns it.
+/// owns it. iOS is host-only, so peer-side topic plumbing has been removed.
 @MainActor
 final class SignalingClient {
-
-    enum Role { case host, peer }
 
     /// Public broker endpoints, tried in order until one connects.
     struct Broker {
@@ -64,7 +62,6 @@ final class SignalingClient {
 
     private(set) var isConnected = false
 
-    private let role: Role
     private let code: String
     private let brokers: [Broker]
     private var brokerIndex = 0
@@ -79,9 +76,6 @@ final class SignalingClient {
     /// breaks: if one side has a longer budget it may successfully connect
     /// to broker N while the other side times out and walks to broker N+1,
     /// publishing/listening on different brokers for the same pairing code.
-    /// Once both sides time out the same broker at the same elapsed time
-    /// they walk the deterministic FNV-1a-seeded list in lock-step and end
-    /// up on whichever broker is reachable from both.
     private static let perBrokerTimeout: TimeInterval = 6
 
     /// In-flight connect timeout for the current attempt. Cancelled on
@@ -100,8 +94,7 @@ final class SignalingClient {
         return d
     }()
 
-    init(role: Role, code: String, tracer: RelayTracer? = nil, brokers: [Broker]? = nil) {
-        self.role = role
+    init(code: String, tracer: RelayTracer? = nil, brokers: [Broker]? = nil) {
         self.code = code
         self.tracer = tracer
         self.brokers = brokers ?? Broker.fallbacks
@@ -111,7 +104,7 @@ final class SignalingClient {
         brokerIndex = startingBrokerIndex()
         attemptCount = 0
         tracer?.log("mqtt", "mqtt.connect.start", [
-            "role": "\(role)",
+            "role": "Host",
             "code": code,
             "brokerCount": brokers.count,
             "startingBrokerIndex": brokerIndex,
@@ -155,7 +148,7 @@ final class SignalingClient {
         ])
 
         let socket = CocoaMQTTWebSocket(uri: broker.path)
-        let clientID = "bluesteal-\(role)-\(UUID().uuidString.prefix(8))"
+        let clientID = "bluesteal-host-\(UUID().uuidString.prefix(8))"
         let client = CocoaMQTT(clientID: clientID,
                                host: broker.host,
                                port: broker.port,
@@ -192,9 +185,6 @@ final class SignalingClient {
     /// still in flight (no `didConnect`, no `didDisconnect` advance), tear
     /// the client down and advance to the next broker.
     private func handleConnectTimeout(forIndex index: Int) {
-        // The race: a successful or failing connect callback may have already
-        // advanced us; in that case `brokerIndex` has moved or `isConnected`
-        // is true. Either way, this timeout is stale.
         guard brokerIndex == index, !isConnected, mqtt != nil else { return }
         let broker = brokers[index]
         tracer?.log("error", "mqtt.connect.timeout", [
@@ -202,9 +192,6 @@ final class SignalingClient {
             "host": broker.host,
             "timeoutMs": Int(Self.perBrokerTimeout * 1000)
         ])
-        // Detach the dying client first so its `didDisconnect` callback (which
-        // will fire when we call disconnect below) becomes a no-op rather than
-        // re-entering the broker-walking path.
         let dying = mqtt
         mqtt = nil
         dying?.disconnect()
@@ -229,8 +216,6 @@ final class SignalingClient {
         let dying = mqtt
         mqtt = nil
         isConnected = false
-        // Cap the attempt counter so any late `didDisconnect` from `dying`
-        // doesn't kick off another broker walk.
         attemptCount = brokers.count
         dying?.disconnect()
     }
@@ -248,10 +233,10 @@ final class SignalingClient {
         let topic: String
         let retain: Bool
         switch message {
-        case .offer:   topic = "\(root)/offer";  retain = true
-        case .answer:  topic = "\(root)/answer"; retain = false
-        case .ice:     topic = "\(root)/ice/\(role == .host ? "host" : "peer")"; retain = false
-        case .bye:     topic = "\(root)/bye";    retain = false
+        case .offer:   topic = "\(root)/offer";    retain = true
+        case .answer:  topic = "\(root)/answer";   retain = false
+        case .ice:     topic = "\(root)/ice/host"; retain = false
+        case .bye:     topic = "\(root)/bye";      retain = false
         }
         let data: Data
         let body: String
@@ -281,9 +266,7 @@ final class SignalingClient {
 
     fileprivate func didConnect(client: CocoaMQTT) {
         // Reject stale callbacks from a previous broker attempt that we've
-        // already abandoned (timeout fired, explicit disconnect, etc.). The
-        // hazard: CocoaMQTT may surface the result of attempt N's connect()
-        // after we've moved on to attempt N+1.
+        // already abandoned (timeout fired, explicit disconnect, etc.).
         guard client === self.mqtt else {
             tracer?.log("mqtt", "mqtt.connected.ignored", ["reason": "stale client"])
             return
@@ -293,23 +276,18 @@ final class SignalingClient {
         let root = Self.topicRoot(for: code)
         guard let mqtt else { return }
 
-        var topics: [String] = []
-        switch role {
-        case .host:
-            topics.append("\(root)/answer")
-            topics.append("\(root)/ice/peer")
-        case .peer:
-            topics.append("\(root)/offer")
-            topics.append("\(root)/ice/host")
-        }
-        topics.append("\(root)/bye")
-
+        // Host subscribes only to the topics the peer publishes.
+        let topics = [
+            "\(root)/answer",
+            "\(root)/ice/peer",
+            "\(root)/bye"
+        ]
         for t in topics { mqtt.subscribe(t, qos: .qos1) }
 
         let broker = brokers[brokerIndex]
         tracer?.log("mqtt", "mqtt.connected",
                     ["host": broker.host, "port": Int(broker.port), "tls": broker.useTLS])
-        tracer?.log("mqtt", "mqtt.subscribed", ["role": "\(role)", "topics": topics])
+        tracer?.log("mqtt", "mqtt.subscribed", ["role": "Host", "topics": topics])
 
         onConnect?()
     }
@@ -343,10 +321,6 @@ final class SignalingClient {
     }
 
     fileprivate func didDisconnect(client: CocoaMQTT, error: Error?) {
-        // Reject stale disconnect callbacks from a previous broker attempt.
-        // After a timeout or explicit `disconnect()` we tear down the old
-        // client and start a new one; CocoaMQTT may still deliver the old
-        // client's `mqttDidDisconnect` afterwards.
         guard client === self.mqtt else {
             tracer?.log("mqtt", "mqtt.disconnected.ignored",
                         ["reason": "stale client",
@@ -364,8 +338,6 @@ final class SignalingClient {
                         ["index": brokerIndex,
                          "host": brokers[brokerIndex].host,
                          "error": error?.localizedDescription ?? "disconnected"])
-            // Detach the failed client so a duplicate `didDisconnect` from
-            // CocoaMQTT (some failure paths fire twice) doesn't re-enter.
             mqtt = nil
             advanceToNextBroker()
             return
@@ -374,10 +346,7 @@ final class SignalingClient {
     }
 
     private func isOwnOrigin(topic: String) -> Bool {
-        switch role {
-        case .host: return topic.hasSuffix("/ice/host") || topic.hasSuffix("/offer")
-        case .peer: return topic.hasSuffix("/ice/peer") || topic.hasSuffix("/answer")
-        }
+        topic.hasSuffix("/ice/host") || topic.hasSuffix("/offer")
     }
 
     nonisolated static func signalingTypeName(_ m: SignalingMessage) -> String {
@@ -430,15 +399,9 @@ private final class MQTTDelegateProxy: NSObject, CocoaMQTTDelegate {
     func mqttDidPing(_ mqtt: CocoaMQTT) {}
     func mqttDidReceivePong(_ mqtt: CocoaMQTT) {}
 
-    /// CocoaMQTT's WSS path (`CocoaMQTTWebSocket.FoundationConnection`)
-    /// forwards every TLS auth challenge from `URLSessionWebSocketTask` to
-    /// this optional delegate method. If nobody resolves the completion
-    /// handler, the WSS task waits for its internal challenge timeout to
-    /// fire and then cancels with "certificate unknown" — which surfaced as
-    /// `boringssl_context_certificate_verify_callback FAIL` for all three
-    /// public brokers despite the certs being valid. Defer to the OS's
-    /// default trust evaluation; for public brokers like HiveMQ / EMQX /
-    /// Mosquitto that's exactly what we want.
+    /// CocoaMQTT's WSS path forwards TLS auth challenges here. Defer to the
+    /// OS's default trust evaluation; for public brokers (HiveMQ, EMQX,
+    /// Mosquitto) that's exactly what we want.
     func mqtt(_ mqtt: CocoaMQTT, didReceive trust: SecTrust, completionHandler: @escaping (Bool) -> Void) {
         completionHandler(true)
     }

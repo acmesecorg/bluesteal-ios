@@ -1,27 +1,26 @@
 //
 //  RelayClient.swift
-//  bluesteal
+//  bluesteal-ios
+//
+//  Host-only WebRTC DataChannel orchestrator. iOS cannot re-broadcast peer
+//  adverts (CBPeripheralManager limitations) so the peer role makes no sense
+//  here — the join flow, peer-side signaling branches, and inbound `.advert`
+//  handling have all been removed.
 //
 
 import Foundation
 @preconcurrency import WebRTC
 import Observation
 
-/// Orchestrates a WebRTC DataChannel between two bluesteal instances paired
-/// by an 8-char code. The handshake (SDP + ICE) travels over a public MQTT
-/// broker via `SignalingClient`; once `RTCDataChannel` is open we drop off
-/// the broker and the channel is the only path used.
 @MainActor
 @Observable
 final class RelayClient {
 
-    enum Role { case host, peer }
     enum State: Equatable {
         case idle
         case hosting(code: String)
-        case joining(code: String)
         case negotiating
-        case open(role: Role)
+        case open
         case closed(reason: String)
     }
 
@@ -29,10 +28,13 @@ final class RelayClient {
         didSet { traceStateChange(from: oldValue, to: state) }
     }
     private(set) var messagesSent = 0
-    private(set) var messagesReceived = 0
+    /// Tally of heartbeats on the data channel in either direction.
+    /// Surfaces in the UI alongside `sent` so a session that is otherwise
+    /// silent (no adverts flowing) still visibly ticks every ~2 s.
+    private(set) var heartbeatCount = 0
     private(set) var isUsingTURN = false
 
-    /// Inbound application messages (non-bye). Set by `AdvertRelay`.
+    /// Inbound application messages (non-bye, non-advert). Set by `AdvertRelay`.
     var onMessage: ((RelayMessage) -> Void)?
 
     /// Fires on every distinct `state` transition. Set by `AdvertRelay` to
@@ -51,7 +53,6 @@ final class RelayClient {
     private var peerConnection: RTCPeerConnection?
     private var dataChannel: RTCDataChannel?
     private var signaling: SignalingClient?
-    private var role: Role = .host
     private var code: String = ""
     private let delegateProxy = WebRTCDelegateProxy()
 
@@ -89,7 +90,6 @@ final class RelayClient {
     func host() -> String {
         let code = SignalingClient.makeCode()
         self.code = code
-        role = .host
         isTornDown = false
         tracer.setContext(role: "Host", code: code)
         tracer.log("relay", "relay.host", ["code": code])
@@ -98,20 +98,8 @@ final class RelayClient {
         // the data channel + offer are deferred to `signalingDidConnect()` so
         // we don't publish an offer the broker never received.
         createPeerConnection()
-        startSignaling(code: code, role: .host)
+        startSignaling(code: code)
         return code
-    }
-
-    func join(code: String) {
-        self.code = code
-        role = .peer
-        isTornDown = false
-        tracer.setContext(role: "Peer", code: code)
-        tracer.log("relay", "relay.join", ["code": code])
-        state = .joining(code: code)
-        createPeerConnection()
-        startSignaling(code: code, role: .peer)
-        // Peer's data channel arrives via peerConnection(_:didOpen:).
     }
 
     func disconnect(reason: String = "user") {
@@ -155,12 +143,13 @@ final class RelayClient {
         dataChannel.sendData(buffer)
         tracer.log("dc", "dc.send", ["type": typeName, "payloadBytes": data.count])
         if case .advert = message { messagesSent += 1 }
+        if case .heartbeat = message { heartbeatCount += 1 }
     }
 
     // MARK: - Setup
 
-    private func startSignaling(code: String, role: SignalingClient.Role) {
-        let client = SignalingClient(role: role, code: code, tracer: tracer)
+    private func startSignaling(code: String) {
+        let client = SignalingClient(code: code, tracer: tracer)
         client.onConnect = { [weak self] in
             self?.signalingDidConnect()
         }
@@ -177,15 +166,13 @@ final class RelayClient {
     }
 
     /// Called once the MQTT signaling broker is connected and subscribed.
-    /// For the Host this is where the data channel is created and the SDP
-    /// offer is published; for the Peer there's nothing to do — the offer
-    /// will arrive via `handleSignaling`.
+    /// Creates the data channel and publishes the SDP offer.
     ///
     /// Guards against a late arrival after `disconnect()`: if the session
     /// has been torn down or the peer connection is gone, the callback is a
     /// no-op (mirrors `relay.signaling.connected.ignored` on Windows).
     private func signalingDidConnect() {
-        tracer.log("relay", "relay.signaling.connected", ["role": "\(role)"])
+        tracer.log("relay", "relay.signaling.connected", ["role": "Host"])
         guard !isTornDown, peerConnection != nil, signaling != nil else {
             tracer.log("relay", "relay.signaling.connected.ignored",
                        ["state": Self.stateLabel(state),
@@ -194,7 +181,6 @@ final class RelayClient {
                         "hasSignaling": signaling != nil])
             return
         }
-        guard role == .host else { return }
 
         let cfg = RTCDataChannelConfiguration()
         cfg.isOrdered = true
@@ -233,7 +219,7 @@ final class RelayClient {
         ]
     }
 
-    // MARK: - Offer / answer
+    // MARK: - Offer
 
     private func createOffer() {
         guard let pc = peerConnection else { return }
@@ -259,63 +245,17 @@ final class RelayClient {
         }
     }
 
-    private func createAnswer() {
-        guard let pc = peerConnection else { return }
-        let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
-        pc.answer(for: constraints) { [weak self] sdp, error in
-            Task { @MainActor in
-                guard let self else { return }
-                guard let sdp else {
-                    self.tracer.log("error", "pc.createAnswer.error",
-                                    ["error": "\(error?.localizedDescription ?? "no sdp")"])
-                    return
-                }
-                self.tracer.log("pc", "pc.createAnswer", ["sdpBytes": sdp.sdp.count])
-                pc.setLocalDescription(sdp) { err in
-                    Task { @MainActor in
-                        self.tracer.log("pc", "pc.setLocalDescription",
-                                        ["type": "answer",
-                                         "result": err?.localizedDescription ?? "OK"])
-                        self.signaling?.publish(.answer(sdp: sdp.sdp))
-                        self.flushLocalCandidates()
-                    }
-                }
-            }
-        }
-    }
-
     // MARK: - Signaling inbound
 
     private func handleSignaling(_ message: SignalingMessage) {
         guard let pc = peerConnection else { return }
         switch message {
-        case .offer(let sdp):
-            guard role == .peer else {
-                tracer.log("signaling", "signaling.unexpected",
-                           ["type": "offer", "role": "host"])
-                return
-            }
-            let remote = RTCSessionDescription(type: .offer, sdp: sdp)
-            pc.setRemoteDescription(remote) { [weak self] err in
-                Task { @MainActor in
-                    guard let self else { return }
-                    self.tracer.log("pc", "pc.setRemoteDescription",
-                                    ["type": "offer",
-                                     "result": err?.localizedDescription ?? "OK"])
-                    guard err == nil else { return }
-                    self.hasRemoteDescription = true
-                    self.state = .negotiating
-                    self.drainPendingRemoteCandidates()
-                    self.createAnswer()
-                }
-            }
+        case .offer:
+            // Host should never receive an offer.
+            tracer.log("signaling", "signaling.unexpected",
+                       ["type": "offer", "role": "Host"])
 
         case .answer(let sdp):
-            guard role == .host else {
-                tracer.log("signaling", "signaling.unexpected",
-                           ["type": "answer", "role": "peer"])
-                return
-            }
             let remote = RTCSessionDescription(type: .answer, sdp: sdp)
             pc.setRemoteDescription(remote) { [weak self] err in
                 Task { @MainActor in
@@ -334,9 +274,9 @@ final class RelayClient {
         case .ice(let cand):
             // SIPSorcery on Windows emits the bare candidate value
             // (`foundation component proto …`) without the `candidate:`
-            // prefix. Google's WebRTC (used here on macOS) follows the W3C
-            // spec strictly and rejects strings that don't start with
-            // `candidate:`. Normalise defensively — accepts both forms.
+            // prefix. Google's WebRTC follows the W3C spec strictly and
+            // rejects strings that don't start with `candidate:`. Normalise
+            // defensively — accepts both forms.
             let normalisedSdp = cand.sdp.hasPrefix("candidate:")
                 ? cand.sdp
                 : "candidate:" + cand.sdp
@@ -432,27 +372,6 @@ final class RelayClient {
         }
     }
 
-    fileprivate func didOpenRemoteDataChannel(_ channel: RTCDataChannel) {
-        tracer.log("dc", "dc.received",
-                   ["label": channel.label,
-                    "state": "\(channel.readyState.rawValue)"])
-        guard !isTornDown else {
-            tracer.log("dc", "dc.received.ignored", ["reason": "torn down"])
-            return
-        }
-        dataChannel = channel
-        channel.delegate = delegateProxy
-        // The peer often receives a data channel that is *already* in `.open`
-        // by the time this delegate fires (the DTLS+SCTP handshake finishes
-        // before WebRTC surfaces `didOpen`). Subscribing to state changes
-        // after that point would never see the transition to open, so drive
-        // the open path synchronously here.
-        if channel.readyState == .open {
-            tracer.log("dc", "dc.alreadyOpen", ["label": channel.label])
-            dataChannelDidChange(channel)
-        }
-    }
-
     fileprivate func didChangeIceState(_ newState: RTCIceConnectionState) {
         tracer.log("ice", "ice.connectionState", ["state": "\(newState.rawValue)"])
         switch newState {
@@ -473,7 +392,7 @@ final class RelayClient {
         switch channel.readyState {
         case .open:
             tracer.log("dc", "dc.open", ["label": channel.label])
-            state = .open(role: role)
+            state = .open
             signaling?.disconnect()
             signaling = nil
         case .closed:
@@ -498,7 +417,16 @@ final class RelayClient {
                         "jsonPreview": Self.preview(buffer.data)])
             return
         }
-        if case .advert = message { messagesReceived += 1 }
+        if case .heartbeat = message { heartbeatCount += 1 }
+        // Host-only: a peer should never send us adverts. Log + drop so a
+        // misbehaving peer can't slip data into our UI, but don't tear down
+        // the session — heartbeats and bye should still get through.
+        if case .advert = message {
+            tracer.log("dc", "dc.message.unexpected",
+                       ["type": "advert",
+                        "reason": "host-only build does not consume inbound adverts"])
+            return
+        }
         if case .bye(let reason) = message {
             disconnect(reason: "peer: \(reason)")
             return
@@ -521,9 +449,8 @@ final class RelayClient {
         switch s {
         case .idle:                  return "idle"
         case .hosting(let c):        return "hosting(\(c))"
-        case .joining(let c):        return "joining(\(c))"
         case .negotiating:           return "negotiating"
-        case .open(let r):           return "open(\(r == .host ? "host" : "peer"))"
+        case .open:                  return "open"
         case .closed(let reason):    return "closed(\(reason))"
         }
     }
@@ -592,10 +519,10 @@ private final class WebRTCDelegateProxy: NSObject,
     func peerConnection(_ peerConnection: RTCPeerConnection,
                         didRemove candidates: [RTCIceCandidate]) {}
 
+    /// Host creates its own data channel in `signalingDidConnect()`, so this
+    /// delegate method never fires in a host-only build. No-op.
     func peerConnection(_ peerConnection: RTCPeerConnection,
-                        didOpen dataChannel: RTCDataChannel) {
-        Task { @MainActor in self.owner?.didOpenRemoteDataChannel(dataChannel) }
-    }
+                        didOpen dataChannel: RTCDataChannel) {}
 
     // MARK: RTCDataChannelDelegate
 

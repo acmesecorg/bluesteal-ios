@@ -2,9 +2,8 @@
 //  RelayView.swift
 //  bluesteal-ios
 //
-//  iOS adaptation of the macOS RelayView. Functionally equivalent — same
-//  state-machine view onto RelayClient — but laid out to work in iPhone
-//  width and using iOS-native sharing instead of NSWorkspace.
+//  Host-only relay control bar. iOS cannot re-broadcast peer adverts so
+//  joining an existing session makes no sense — only the Host flow remains.
 //
 
 import SwiftUI
@@ -12,9 +11,7 @@ import SwiftUI
 struct RelayView: View {
     @Environment(RelayClient.self) private var relay
 
-    @State private var showJoinSheet: Bool = false
     @State private var showLogsSheet: Bool = false
-    @State private var joinCode: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -29,14 +26,6 @@ struct RelayView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(.bar)
-        .sheet(isPresented: $showJoinSheet) {
-            JoinSheet(
-                joinCode: $joinCode,
-                onSubmit: submitJoin,
-                onCancel: { showJoinSheet = false; joinCode = "" }
-            )
-            .presentationDetents([.height(220)])
-        }
         .sheet(isPresented: $showLogsSheet) {
             LogsShareSheet()
         }
@@ -51,7 +40,7 @@ struct RelayView: View {
             idleControls
         case .hosting(let code):
             hostingControls(code: code)
-        case .joining, .negotiating:
+        case .negotiating:
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
                 Text(stateLabel).font(.caption).foregroundStyle(.secondary)
@@ -68,9 +57,6 @@ struct RelayView: View {
         HStack(spacing: 8) {
             Button("Host") { _ = relay.host() }
                 .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-            Button("Join…") { showJoinSheet = true }
-                .buttonStyle(.bordered)
                 .controlSize(.small)
             Spacer()
         }
@@ -108,9 +94,11 @@ struct RelayView: View {
 
     private var openControls: some View {
         HStack(spacing: 12) {
-            Text(relay.messagesSent > 0
-                 ? "sent \(relay.messagesSent)"
-                 : "recv \(relay.messagesReceived)")
+            Text("sent \(relay.messagesSent)")
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            Text("hbt \(relay.heartbeatCount)")
                 .font(.caption)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
@@ -152,82 +140,19 @@ struct RelayView: View {
 
     private var statusColor: Color {
         switch relay.state {
-        case .idle, .closed:                           return .secondary
-        case .hosting, .joining, .negotiating:         return .orange
-        case .open:                                    return .green
+        case .idle, .closed:                   return .secondary
+        case .hosting, .negotiating:           return .orange
+        case .open:                            return .green
         }
     }
 
     private var stateLabel: String {
         switch relay.state {
-        case .idle:                                    return "idle"
-        case .hosting:                                 return "hosting"
-        case .joining(let c):                          return "joining \(c)"
-        case .negotiating:                             return "negotiating"
-        case .open:                                    return "open"
-        case .closed(let r):                           return "closed (\(r))"
-        }
-    }
-
-    /// Uppercased + filtered to the alphabet — strips spaces, ambiguous
-    /// I/L/O, and any digits the user might paste from a stale code. The
-    /// "Connect" button gates on this length, not the raw input length.
-    private var normalisedJoinCode: String {
-        let allowed = Set(SignalingClient.codeAlphabet)
-        return joinCode.uppercased().filter { allowed.contains($0) }
-    }
-
-    private func submitJoin() {
-        let code = normalisedJoinCode
-        guard code.count == SignalingClient.codeLength else { return }
-        relay.join(code: code)
-        showJoinSheet = false
-        joinCode = ""
-    }
-}
-
-// MARK: - Join sheet
-
-private struct JoinSheet: View {
-    @Binding var joinCode: String
-    let onSubmit: () -> Void
-    let onCancel: () -> Void
-
-    @FocusState private var codeFieldFocused: Bool
-
-    private var normalised: String {
-        let allowed = Set(SignalingClient.codeAlphabet)
-        return joinCode.uppercased().filter { allowed.contains($0) }
-    }
-
-    var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Enter the \(SignalingClient.codeLength)-letter code shown on the host device.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                TextField("Code", text: $joinCode)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.title2, design: .monospaced))
-                    .textInputAutocapitalization(.characters)
-                    .autocorrectionDisabled()
-                    .focused($codeFieldFocused)
-                    .onSubmit(onSubmit)
-                Spacer()
-            }
-            .padding(16)
-            .navigationTitle("Join session")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", action: onCancel)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Connect", action: onSubmit)
-                        .disabled(normalised.count != SignalingClient.codeLength)
-                }
-            }
-            .onAppear { codeFieldFocused = true }
+        case .idle:                            return "idle"
+        case .hosting:                         return "hosting"
+        case .negotiating:                     return "negotiating"
+        case .open:                            return "open"
+        case .closed(let r):                   return "closed (\(r))"
         }
     }
 }

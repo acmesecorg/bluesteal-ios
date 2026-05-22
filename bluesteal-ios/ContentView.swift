@@ -9,18 +9,9 @@ struct ContentView: View {
     @Environment(CableScanner.self) private var scanner
     @Environment(AdvertStore.self) private var store
     @Environment(RelayClient.self) private var relay
-    @Environment(AdvertRelay.self) private var advertRelay
-    @Environment(DuplicatePayloadDetector.self) private var duplicateDetector
 
     var body: some View {
         VStack(spacing: 0) {
-            if duplicateDetector.isWarningVisible {
-                DuplicateWarningBanner(
-                    onDismiss: { duplicateDetector.dismissWarning() }
-                )
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
             ScannerStatusView(
                 state: scanner.state,
                 isScanning: scanner.isScanning,
@@ -36,7 +27,7 @@ struct ContentView: View {
 
             Divider()
 
-            if store.adverts.isEmpty && advertRelay.received.isEmpty {
+            if store.adverts.isEmpty {
                 ContentUnavailableView {
                     Label("Waiting for caBLE adverts", systemImage: "antenna.radiowaves.left.and.right")
                 } description: {
@@ -46,16 +37,7 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
-                    if !store.adverts.isEmpty {
-                        Section("Local") {
-                            ForEach(store.adverts) { AdvertRowView(advert: $0) }
-                        }
-                    }
-                    if !advertRelay.received.isEmpty {
-                        Section("From peer") {
-                            ForEach(advertRelay.received) { AdvertRowView(advert: $0, source: .relay) }
-                        }
-                    }
+                    ForEach(store.adverts) { AdvertRowView(advert: $0) }
                 }
                 .listStyle(.insetGrouped)
             }
@@ -65,45 +47,6 @@ struct ContentView: View {
                 store.ingest(event)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: duplicateDetector.isWarningVisible)
-    }
-}
-
-/// Warning banner shown when host and peer have both observed an advert
-/// with the same payload bytes. Wording matches the macOS/Windows clients
-/// verbatim — the three clients are expected to look and read the same.
-private struct DuplicateWarningBanner: View {
-    let onDismiss: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.yellow)
-                .imageScale(.large)
-                .padding(.top, 2)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Host and peer are seeing the same advert")
-                    .font(.subheadline.weight(.semibold))
-                Text("Bluesteal works best when host and peer are not within range of the same Bluetooth device for the CTAP hybrid flow.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 8)
-
-            Button(action: onDismiss) {
-                Image(systemName: "xmark")
-                    .imageScale(.small)
-            }
-            .buttonStyle(.borderless)
-            .accessibilityLabel("Dismiss")
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.yellow.opacity(0.18))
-        .overlay(alignment: .bottom) { Divider() }
     }
 }
 
@@ -116,5 +59,4 @@ private struct DuplicateWarningBanner: View {
         .environment(store)
         .environment(relay)
         .environment(advertRelay)
-        .environment(DuplicatePayloadDetector(store: store, relay: advertRelay))
 }

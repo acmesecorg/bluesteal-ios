@@ -1,45 +1,31 @@
 //
 //  AdvertRelay.swift
-//  bluesteal
+//  bluesteal-ios
 //
-//  Bridges the local AdvertStore with a paired RelayClient. The host pushes
-//  every deduped CableAdvert to the peer; the peer mirrors them into a
-//  receive-side list so the existing AdvertRowView can render them with
-//  zero changes.
+//  Bridges the local AdvertStore with a host-only RelayClient. iOS only
+//  hosts: every scanned advert is forwarded to the paired peer, and the
+//  4-second heartbeat keep-alive runs for the lifetime of `.open`.
+//
+//  Inbound `.advert` messages are not expected (the peer never sends them
+//  in this direction), so the inbound side is limited to heartbeat
+//  bookkeeping. Anything unexpected is logged + dropped in `RelayClient`.
 //
 
 import Foundation
-import CoreBluetooth
 import Observation
 
 @MainActor
 @Observable
 final class AdvertRelay {
-    /// Adverts received from the paired host, newest-first.
-    private(set) var received: [CableAdvert] = []
-
-    /// Heartbeat-driven aging: last time the host claimed it was still seeing
-    /// adverts. Not used to drop entries yet; surfaced for the UI later.
-    private(set) var lastHostHeartbeat: Date?
-
-    private var receivedIndex: [String: Int] = [:]
+    /// Last heartbeat timestamp received from the paired peer. Surfaced for
+    /// the inbound-silence watchdog when §10 Fix 3 lands; today it's
+    /// observation-only.
+    private(set) var lastPeerHeartbeat: Date?
 
     private let store: AdvertStore
     private let relay: RelayClient
 
     private var heartbeatTask: Task<Void, Never>?
-
-    /// Called for every local advert just before it's sent to the peer.
-    /// Mirrors Windows's `AdvertStore.OnIngest` subscription path —
-    /// secondary observers (e.g. `DuplicatePayloadDetector`) hang off this
-    /// rather than `AdvertStore.onIngest` because that property only
-    /// supports a single subscriber on the Swift side.
-    var onLocalIngest: ((CableAdvert) -> Void)?
-
-    /// Called for every advert received from the peer after the inbound
-    /// list mutates — both new inserts and updates. Mirrors Windows's
-    /// `AdvertRelay.OnReceived` event.
-    var onReceived: ((CableAdvert) -> Void)?
 
     init(store: AdvertStore, relay: RelayClient) {
         self.store = store
@@ -48,21 +34,19 @@ final class AdvertRelay {
     }
 
     private func wireUp() {
-        // Outbound: anything our scanner sees, forward to the peer (and to
-        // any local observers — the duplicate-payload detector hooks here).
+        // Outbound: anything our scanner sees, forward to the paired peer.
         store.onIngest = { [weak self] advert in
-            guard let self else { return }
-            self.relay.send(.advert(.init(from: advert)))
-            self.onLocalIngest?(advert)
+            self?.relay.send(.advert(.init(from: advert)))
         }
-        // Inbound: anything the peer sends us, mirror into the received list.
+        // Inbound: only heartbeats and bye are meaningful for a host-only
+        // app. RelayClient already short-circuits `.bye`, and `.advert` from
+        // the peer is logged + dropped at the RelayClient layer, so this
+        // callback effectively only sees heartbeats.
         relay.onMessage = { [weak self] message in
             self?.handleInbound(message)
         }
-        // Heartbeats run for both Host and Peer for the full duration of
-        // `.open` — both directions must keep the NAT mapping fresh, otherwise
-        // the silent side's UDP binding ages out and ICE consent-freshness
-        // tears the session down. See docs §10.
+        // Heartbeats keep the host's outbound NAT mapping fresh for the
+        // duration of `.open`. See docs §10 Fix 1.
         relay.onStateChange = { [weak self] newState in
             guard let self else { return }
             if case .open = newState {
@@ -94,90 +78,12 @@ final class AdvertRelay {
 
     private func handleInbound(_ message: RelayMessage) {
         switch message {
-        case .advert(let wire):
-            guard let advert = CableAdvert(wire: wire) else { return }
-            if let idx = receivedIndex[advert.id] {
-                received[idx] = advert
-            } else {
-                received.insert(advert, at: 0)
-                rebuildReceivedIndex()
-            }
-            // Notify on both insert and update paths — the duplicate-payload
-            // detector wants to see every received advert event, not just
-            // first observations.
-            onReceived?(advert)
         case .heartbeat(let h):
-            lastHostHeartbeat = h.ts
-        case .bye:
-            // RelayClient tears down on bye.
+            lastPeerHeartbeat = h.ts
+        case .advert, .bye:
+            // .advert is handled (dropped) in RelayClient; .bye triggers
+            // disconnect there. Nothing for AdvertRelay to do.
             break
         }
-    }
-
-    private func rebuildReceivedIndex() {
-        receivedIndex.removeAll(keepingCapacity: true)
-        for (i, a) in received.enumerated() { receivedIndex[a.id] = i }
-    }
-}
-
-// MARK: - Wire <-> domain conversions
-
-extension CableAdvert {
-    nonisolated init?(wire: RelayMessage.Advert) {
-        guard let peripheralID = UUID(uuidString: wire.peripheralID),
-              let payload = Data(hex: wire.payloadHex) else { return nil }
-        // Defensive: an older Windows peer (pre-Phase-1 schema) sends "0000"
-        // as a placeholder for "no service UUID" instead of omitting the
-        // field. Treat it as nil so the row doesn't end up with a phantom
-        // 0x0000 CBUUID.
-        let serviceUUID: CBUUID? = wire.serviceUUID.flatMap { $0 == "0000" ? nil : CBUUID(string: $0) }
-        let variant = AdvertVariant(wireName: wire.variant)
-        let manufacturerData = wire.manufacturerHex.flatMap(Data.init(hex:))
-        let advertisedServiceUUIDs = (wire.advertisedServiceUUIDs ?? []).map { CBUUID(string: $0) }
-        self.init(
-            id: wire.id,
-            peripheralID: peripheralID,
-            serviceUUID: serviceUUID,
-            payload: payload,
-            variant: variant,
-            firstSeen: wire.firstSeen,
-            lastSeen: wire.lastSeen,
-            count: wire.count,
-            rssi: wire.rssi,
-            localName: wire.localName,
-            advertisedServiceUUIDs: advertisedServiceUUIDs,
-            manufacturerData: manufacturerData,
-            txPowerLevel: wire.txPowerLevel,
-            isConnectable: wire.isConnectable
-        )
-    }
-}
-
-extension AdvertVariant {
-    nonisolated init(wireName: String) {
-        switch wireName {
-        case "fidoV2":      self = .fidoV2
-        case "googleV1":    self = .googleV1
-        case "googleV2":    self = .googleV2
-        case "googleMfgV1": self = .googleMfgV1
-        default:            self = .unknown(reason: wireName)
-        }
-    }
-}
-
-extension Data {
-    /// Hex string -> bytes. Accepts lowercase or uppercase; rejects odd lengths
-    /// and non-hex characters.
-    nonisolated init?(hex: String) {
-        guard hex.count.isMultiple(of: 2) else { return nil }
-        var bytes = Data(capacity: hex.count / 2)
-        var i = hex.startIndex
-        while i < hex.endIndex {
-            let j = hex.index(i, offsetBy: 2)
-            guard let byte = UInt8(hex[i..<j], radix: 16) else { return nil }
-            bytes.append(byte)
-            i = j
-        }
-        self = bytes
     }
 }

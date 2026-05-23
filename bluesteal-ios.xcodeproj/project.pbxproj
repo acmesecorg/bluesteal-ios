@@ -272,6 +272,7 @@
 				DEVELOPMENT_TEAM = 533A58DM46;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Bluesteal;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "bluesteal scans Bluetooth LE advertisements to detect and report FIDO caBLE / hybrid-transport beacons.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -305,6 +306,7 @@
 				DEVELOPMENT_TEAM = 533A58DM46;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Bluesteal;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "bluesteal scans Bluetooth LE advertisements to detect and report FIDO caBLE / hybrid-transport beacons.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

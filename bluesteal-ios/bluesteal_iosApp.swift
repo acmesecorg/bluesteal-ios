@@ -11,6 +11,7 @@ struct bluesteal_iosApp: App {
     @State private var store: AdvertStore
     @State private var relay: RelayClient
     @State private var advertRelay: AdvertRelay
+    @State private var tunnel: TunnelTransport
 
     init() {
         let tracer = RelayTracer()
@@ -25,10 +26,14 @@ struct bluesteal_iosApp: App {
         let store = AdvertStore(logger: JSONLLogger())
         let relay = RelayClient(tracer: tracer)
         let advertRelay = AdvertRelay(store: store, relay: relay)
+        // caBLE tunnel transport (parallel to WebRTC). iOS hosts only; inbound
+        // adverts are not consumed so onFrame is left unset.
+        let tunnel = TunnelTransport(tracer: tracer)
         _scanner = State(initialValue: scanner)
         _store = State(initialValue: store)
         _relay = State(initialValue: relay)
         _advertRelay = State(initialValue: advertRelay)
+        _tunnel = State(initialValue: tunnel)
     }
 
     var body: some Scene {
@@ -38,6 +43,7 @@ struct bluesteal_iosApp: App {
                 .environment(store)
                 .environment(relay)
                 .environment(advertRelay)
+                .environment(tunnel)
         }
     }
 }

@@ -27,6 +27,15 @@ final class AdvertRelay {
 
     private var heartbeatTask: Task<Void, Never>?
 
+    /// When set (tunnel mode), outbound adverts are serialised to JSON and sent
+    /// through this closure instead of the WebRTC data channel. Mirrors Windows
+    /// `AdvertRelay.TunnelSend`.
+    var tunnelSend: ((Data) -> Void)?
+
+    private let encoder: JSONEncoder = {
+        let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; return e
+    }()
+
     init(store: AdvertStore, relay: RelayClient) {
         self.store = store
         self.relay = relay
@@ -34,9 +43,16 @@ final class AdvertRelay {
     }
 
     private func wireUp() {
-        // Outbound: anything our scanner sees, forward to the paired peer.
+        // Outbound: anything our scanner sees, forward to the paired peer —
+        // through the tunnel transport when active, otherwise the WebRTC channel.
         store.onIngest = { [weak self] advert in
-            self?.relay.send(.advert(.init(from: advert)))
+            guard let self else { return }
+            let msg = RelayMessage.advert(.init(from: advert))
+            if let tunnelSend = self.tunnelSend {
+                if let data = try? self.encoder.encode(msg) { tunnelSend(data) }
+            } else {
+                self.relay.send(msg)
+            }
         }
         // Inbound: only heartbeats and bye are meaningful for a host-only
         // app. RelayClient already short-circuits `.bye`, and `.advert` from
@@ -83,6 +99,10 @@ final class AdvertRelay {
         case .advert, .bye:
             // .advert is handled (dropped) in RelayClient; .bye triggers
             // disconnect there. Nothing for AdvertRelay to do.
+            break
+        case .handoffOffer, .handoffAck:
+            // Tunnel-transport control frames; handled inside TunnelTransport,
+            // never surfaced on the WebRTC onMessage path.
             break
         }
     }

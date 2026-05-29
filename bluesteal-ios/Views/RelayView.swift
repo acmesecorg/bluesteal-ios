@@ -4,32 +4,19 @@
 //
 //  Host-only relay control bar. iOS cannot re-broadcast peer adverts so
 //  joining an existing session makes no sense — only the Host flow remains.
-//  The transport picker chooses between WebRTC and the caBLE tunnel; in tunnel
-//  mode the copyable value is the OOB token (code-routing) the peer pastes.
+//  The caBLE tunnel is the only transport; the copyable value is the OOB token
+//  (code-routing) the peer pastes.
 //
 
 import SwiftUI
 
 struct RelayView: View {
-    @Environment(RelayClient.self) private var relay
     @Environment(AdvertRelay.self) private var advertRelay
     @Environment(TunnelTransport.self) private var tunnel
 
-    enum TransportKind: String, CaseIterable { case webRTC = "WebRTC", tunnel = "Tunnel" }
-
     @State private var showLogsSheet: Bool = false
-    @State private var transport: TransportKind = .tunnel
 
-    /// The tunnel transport "owns" the UI whenever it is past idle/closed;
-    /// otherwise the WebRTC RelayClient drives it.
-    private var tunnelActive: Bool {
-        switch tunnel.state {
-        case .idle, .closed: return false
-        default:             return true
-        }
-    }
-
-    private var effectiveState: RelayClient.State { tunnelActive ? tunnel.state : relay.state }
+    private var state: RelayState { tunnel.state }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -53,7 +40,7 @@ struct RelayView: View {
 
     @ViewBuilder
     private var controls: some View {
-        switch effectiveState {
+        switch state {
         case .idle, .closed:
             idleControls
         case .hosting(let code):
@@ -73,14 +60,7 @@ struct RelayView: View {
 
     private var idleControls: some View {
         HStack(spacing: 8) {
-            Picker("", selection: $transport) {
-                ForEach(TransportKind.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .controlSize(.small)
-
-            Button("Host", action: startHost)
+            Button("Host", action: startTunnelHost)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
             Spacer()
@@ -88,12 +68,10 @@ struct RelayView: View {
     }
 
     private func hostingControls(code: String) -> some View {
-        let isTunnel = tunnelActive
-        let ready = !isTunnel || tunnel.token != nil
-        let displayValue = isTunnel ? (tunnel.token ?? "waiting…") : code
-        let label = isTunnel ? "Token" : "Code"
+        let displayValue = tunnel.token ?? "waiting…"
+        let ready = tunnel.token != nil
         return HStack(spacing: 10) {
-            Text(label)
+            Text("Token")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Text(displayValue)
@@ -113,7 +91,7 @@ struct RelayView: View {
             .buttonStyle(.borderless)
             .controlSize(.small)
             .disabled(!ready)
-            .accessibilityLabel("Copy \(label.lowercased())")
+            .accessibilityLabel("Copy token")
             Spacer()
             Button("Cancel", role: .destructive) { cancelOrDisconnect() }
                 .buttonStyle(.borderless)
@@ -123,31 +101,17 @@ struct RelayView: View {
 
     private var openControls: some View {
         HStack(spacing: 12) {
-            if tunnelActive {
-                Text("sent \(tunnel.messagesSent)")
-                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
-                Text("hbt \(tunnel.heartbeatCount)")
-                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
-                if tunnel.hopNumber > 0 {
-                    Text("hop \(tunnel.hopNumber)")
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(Color.blue.opacity(0.18))
-                        .foregroundStyle(.blue)
-                        .clipShape(Capsule())
-                }
-            } else {
-                Text("sent \(relay.messagesSent)")
-                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
-                Text("hbt \(relay.heartbeatCount)")
-                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
-                if relay.isUsingTURN {
-                    Text("TURN").font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(Color.orange.opacity(0.18))
-                        .foregroundStyle(.orange)
-                        .clipShape(Capsule())
-                }
+            Text("sent \(tunnel.messagesSent)")
+                .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+            Text("hbt \(tunnel.heartbeatCount)")
+                .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+            if tunnel.hopNumber > 0 {
+                Text("hop \(tunnel.hopNumber)")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(Color.blue.opacity(0.18))
+                    .foregroundStyle(.blue)
+                    .clipShape(Capsule())
             }
             Spacer()
             Button("Disconnect") { cancelOrDisconnect() }
@@ -179,7 +143,7 @@ struct RelayView: View {
     }
 
     private var statusColor: Color {
-        switch effectiveState {
+        switch state {
         case .idle, .closed:                   return .secondary
         case .hosting, .negotiating:           return .orange
         case .open:                            return .green
@@ -187,24 +151,16 @@ struct RelayView: View {
     }
 
     private var stateLabel: String {
-        let prefix = tunnelActive ? "tunnel " : ""
-        switch effectiveState {
+        switch state {
         case .idle:                            return "idle"
-        case .hosting:                         return "\(prefix)hosting"
-        case .negotiating:                     return "\(prefix)negotiating"
-        case .open:                            return "\(prefix)open"
+        case .hosting:                         return "tunnel hosting"
+        case .negotiating:                     return "tunnel negotiating"
+        case .open:                            return "tunnel open"
         case .closed(let r):                   return "closed (\(r))"
         }
     }
 
     // MARK: - Actions
-
-    private func startHost() {
-        switch transport {
-        case .webRTC: _ = relay.host()
-        case .tunnel: startTunnelHost()
-        }
-    }
 
     private func wireTunnelSend() {
         advertRelay.tunnelSend = { data in
@@ -213,18 +169,14 @@ struct RelayView: View {
     }
 
     private func startTunnelHost() {
-        let code = SignalingClient.makeCode()
+        let code = PairingCode.make()
         wireTunnelSend()
         Task { try? await tunnel.host(code: code) }
     }
 
     private func cancelOrDisconnect() {
-        if tunnelActive {
-            advertRelay.tunnelSend = nil
-            tunnel.disconnect()
-        } else {
-            relay.disconnect(reason: "user")
-        }
+        advertRelay.tunnelSend = nil
+        tunnel.disconnect()
     }
 }
 

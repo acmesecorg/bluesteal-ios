@@ -7,9 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		BD9B08952FBD075000CAAF1C /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = BD9B08922FBD075000CAAF1C /* WebRTC */; };
-		BD9B08962FBD075000CAAF1C /* CocoaMQTT in Frameworks */ = {isa = PBXBuildFile; productRef = BD9B08932FBD075000CAAF1C /* CocoaMQTT */; };
-		BD9B08972FBD075000CAAF1C /* CocoaMQTTWebSocket in Frameworks */ = {isa = PBXBuildFile; productRef = BD9B08942FBD075000CAAF1C /* CocoaMQTTWebSocket */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -29,9 +26,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				BD9B08972FBD075000CAAF1C /* CocoaMQTTWebSocket in Frameworks */,
-				BD9B08962FBD075000CAAF1C /* CocoaMQTT in Frameworks */,
-				BD9B08952FBD075000CAAF1C /* WebRTC in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -73,11 +67,6 @@
 				BD9B087B2FBD06A900CAAF1C /* bluesteal-ios */,
 			);
 			name = "bluesteal-ios";
-			packageProductDependencies = (
-				BD9B08922FBD075000CAAF1C /* WebRTC */,
-				BD9B08932FBD075000CAAF1C /* CocoaMQTT */,
-				BD9B08942FBD075000CAAF1C /* CocoaMQTTWebSocket */,
-			);
 			productName = "bluesteal-ios";
 			productReference = BD9B08792FBD06A900CAAF1C /* bluesteal-ios.app */;
 			productType = "com.apple.product-type.application";
@@ -106,10 +95,6 @@
 			);
 			mainGroup = BD9B08702FBD06A900CAAF1C;
 			minimizedProjectReferenceProxies = 1;
-			packageReferences = (
-				BD9B08902FBD075000CAAF1C /* XCRemoteSwiftPackageReference "WebRTC" */,
-				BD9B08912FBD075000CAAF1C /* XCRemoteSwiftPackageReference "CocoaMQTT" */,
-			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = BD9B087A2FBD06A900CAAF1C /* Products */;
 			projectDirPath = "";
@@ -272,6 +257,7 @@
 				DEVELOPMENT_TEAM = 533A58DM46;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Bluesteal;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "bluesteal scans Bluetooth LE advertisements to detect and report FIDO caBLE / hybrid-transport beacons.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -306,6 +292,7 @@
 				DEVELOPMENT_TEAM = 533A58DM46;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Bluesteal;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "bluesteal scans Bluetooth LE advertisements to detect and report FIDO caBLE / hybrid-transport beacons.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -353,42 +340,6 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		BD9B08902FBD075000CAAF1C /* XCRemoteSwiftPackageReference "WebRTC" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/stasel/WebRTC";
-			requirement = {
-				kind = exactVersion;
-				version = 134.0.0;
-			};
-		};
-		BD9B08912FBD075000CAAF1C /* XCRemoteSwiftPackageReference "CocoaMQTT" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/emqx/CocoaMQTT";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.2.4;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		BD9B08922FBD075000CAAF1C /* WebRTC */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = BD9B08902FBD075000CAAF1C /* XCRemoteSwiftPackageReference "WebRTC" */;
-			productName = WebRTC;
-		};
-		BD9B08932FBD075000CAAF1C /* CocoaMQTT */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = BD9B08912FBD075000CAAF1C /* XCRemoteSwiftPackageReference "CocoaMQTT" */;
-			productName = CocoaMQTT;
-		};
-		BD9B08942FBD075000CAAF1C /* CocoaMQTTWebSocket */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = BD9B08912FBD075000CAAF1C /* XCRemoteSwiftPackageReference "CocoaMQTT" */;
-			productName = CocoaMQTTWebSocket;
-		};
-/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = BD9B08712FBD06A900CAAF1C /* Project object */;
 }

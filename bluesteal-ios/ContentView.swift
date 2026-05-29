@@ -8,7 +8,6 @@ import SwiftUI
 struct ContentView: View {
     @Environment(CableScanner.self) private var scanner
     @Environment(AdvertStore.self) private var store
-    @Environment(RelayClient.self) private var relay
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,11 +51,10 @@ struct ContentView: View {
 
 #Preview {
     let store = AdvertStore(logger: JSONLLogger())
-    let relay = RelayClient(tracer: RelayTracer())
-    let advertRelay = AdvertRelay(store: store, relay: relay)
+    let advertRelay = AdvertRelay(store: store)
     return ContentView()
         .environment(CableScanner(previewMode: true))
         .environment(store)
-        .environment(relay)
         .environment(advertRelay)
+        .environment(TunnelTransport(tracer: RelayTracer()))
 }

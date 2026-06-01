@@ -12,6 +12,7 @@ struct bluesteal_iosApp: App {
     @State private var advertRelay: AdvertRelay
     @State private var tunnel: TunnelTransport
     @State private var tracer: RelayTracer
+    @State private var qrRelay: QRRelay
 
     init() {
         let tracer = RelayTracer()
@@ -25,21 +26,42 @@ struct bluesteal_iosApp: App {
         let scanner = CableScanner()
         let store = AdvertStore(logger: JSONLLogger())
         let advertRelay = AdvertRelay(store: store)
-        // caBLE tunnel transport — the only transport. iOS hosts only; inbound
-        // adverts are not consumed so onFrame is left unset.
+        // caBLE tunnel transport — the only transport. iOS hosts only.
         let tunnel = TunnelTransport(tracer: tracer)
+        // Inbound frames carry the peer's shared QR codes (and, on dual-role
+        // platforms, adverts — ignored here). Route them to the QR relay.
+        let qrRelay = QRRelay(tunnel: tunnel, tracer: tracer)
+        tunnel.onFrame = { [weak qrRelay] bytes in qrRelay?.handleFrame(bytes) }
+
         _scanner = State(initialValue: scanner)
         _store = State(initialValue: store)
         _advertRelay = State(initialValue: advertRelay)
         _tunnel = State(initialValue: tunnel)
         _tracer = State(initialValue: tracer)
+        _qrRelay = State(initialValue: qrRelay)
 
         // Test affordance: `-host` launch arg auto-hosts without the custom-URL
         // confirmation prompt (which blocks headless `simctl openurl`). The
         // bluesteal:// URL scheme below is the production auto-drive.
-        if CommandLine.arguments.contains("-host") {
+        let args = CommandLine.arguments
+        if args.contains("-host") {
             tracer.log("app", "app.autohost", nil)
             Self.beginHost(tunnel: tunnel, advertRelay: advertRelay)
+        }
+        // Test affordance: `-sendqr <uri>` hosts and, once a peer connects,
+        // sends the URI as a QR — for headless verification of the share path.
+        if let i = args.firstIndex(of: "-sendqr"), i + 1 < args.count {
+            let uri = args[i + 1]
+            tracer.log("app", "app.autosendqr", ["len": uri.count])
+            Self.beginHost(tunnel: tunnel, advertRelay: advertRelay)
+            Task { @MainActor [weak tunnel, weak qrRelay] in
+                for _ in 0..<120 {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    guard let tunnel, case .open = tunnel.state else { continue }
+                    qrRelay?.send(uri)
+                    return
+                }
+            }
         }
     }
 
@@ -60,22 +82,37 @@ struct bluesteal_iosApp: App {
                 .environment(store)
                 .environment(advertRelay)
                 .environment(tunnel)
+                .environment(qrRelay)
                 .onOpenURL { handle(url: $0) }
         }
     }
 
-    /// Auto-drives the Host flow from a `bluesteal://host` URL so the app can be
-    /// launched pre-configured for testing (e.g. `xcrun simctl openurl`). The
-    /// hosted token surfaces in the UI and is logged via the tracer
-    /// (`token.ready`). iOS is host-only, so `join` is not supported.
+    /// Auto-drives flows from a `bluesteal://` URL. `host` starts hosting (the
+    /// production auto-drive). `sendqr` / `showqr` are test-only affordances for
+    /// driving the QR send/display path headlessly (e.g. `xcrun simctl openurl`).
     private func handle(url: URL) {
         guard url.scheme?.lowercased() == "bluesteal" else { return }
         switch url.host?.lowercased() {
         case "host":
             tracer.log("app", "app.openurl.host", ["url": url.absoluteString])
             Self.beginHost(tunnel: tunnel, advertRelay: advertRelay)
+        case "sendqr":
+            if let uri = Self.queryValue(url, "uri") {
+                tracer.log("app", "app.openurl.sendqr", ["len": uri.count])
+                qrRelay.send(uri)
+            }
+        case "showqr":
+            if let uri = Self.queryValue(url, "uri") {
+                tracer.log("app", "app.openurl.showqr", ["len": uri.count])
+                qrRelay.received = QRItem(uri: uri)
+            }
         default:
             tracer.log("app", "app.openurl.unsupported", ["url": url.absoluteString])
         }
+    }
+
+    private static func queryValue(_ url: URL, _ name: String) -> String? {
+        URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == name })?.value
     }
 }

@@ -6,9 +6,6 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXBuildFile section */
-/* End PBXBuildFile section */
-
 /* Begin PBXFileReference section */
 		BD9B08792FBD06A900CAAF1C /* bluesteal-ios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "bluesteal-ios.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -260,6 +257,7 @@
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Bluesteal;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "bluesteal scans Bluetooth LE advertisements to detect and report FIDO caBLE / hybrid-transport beacons.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "bluesteal scans FIDO caBLE QR codes so you can copy or share them with a paired device.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -295,6 +293,7 @@
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Bluesteal;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "bluesteal scans Bluetooth LE advertisements to detect and report FIDO caBLE / hybrid-transport beacons.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "bluesteal scans FIDO caBLE QR codes so you can copy or share them with a paired device.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -339,7 +338,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
 	};
 	rootObject = BD9B08712FBD06A900CAAF1C /* Project object */;
 }

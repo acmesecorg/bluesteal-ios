@@ -184,7 +184,7 @@ final class TunnelTransport {
         switch message {
         case .heartbeat:
             heartbeatCount += 1
-        case .advert:
+        case .advert, .qr:
             messagesReceived += 1
             onFrame?(frame)
         case .bye(let reason):

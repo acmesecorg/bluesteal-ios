@@ -89,6 +89,7 @@ final class TunnelTransport {
 
     @discardableResult
     func host(code: String) async throws -> String {
+        resetSession()
         self.code = code
         let keys = TunnelKeyDerivation.derive(code: code)
         self.keys = keys
@@ -341,6 +342,26 @@ final class TunnelTransport {
         if !state.isClosed {
             state = .closed(reason: userInitiated ? "user" : (peerSaidBye ? "peer" : "closed"))
         }
+    }
+
+    /// Wipe per-session state at the start of a new host() so a previous
+    /// session's hop count, message counters, token, and `disposed` flag don't
+    /// bleed into the new one.
+    private func resetSession() {
+        hopNumber = 0
+        messagesSent = 0
+        messagesReceived = 0
+        heartbeatCount = 0
+        token = nil
+        disposed = false
+        userInitiated = false
+        peerSaidBye = false
+        pendingRoutingId = nil
+        hopState = .steady
+        heartbeatTask?.cancel(); heartbeatTask = nil
+        handoffTask?.cancel(); handoffTask = nil
+        currentHop?.close(); currentHop = nil
+        pendingHop?.close(); pendingHop = nil
     }
 
     private static func label(_ s: RelayState) -> String {

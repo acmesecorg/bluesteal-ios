@@ -255,7 +255,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Bluesteal;
+				INFOPLIST_KEY_CFBundleDisplayName = "Blue Steal";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "bluesteal scans Bluetooth LE advertisements to detect and report FIDO caBLE / hybrid-transport beacons.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "bluesteal scans FIDO caBLE QR codes so you can copy or share them with a paired device.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -291,7 +291,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Bluesteal;
+				INFOPLIST_KEY_CFBundleDisplayName = "Blue Steal";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "bluesteal scans Bluetooth LE advertisements to detect and report FIDO caBLE / hybrid-transport beacons.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "bluesteal scans FIDO caBLE QR codes so you can copy or share them with a paired device.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

@@ -59,7 +59,7 @@ struct ContentView: View {
                     .listStyle(.plain)
                 }
             }
-            .navigationTitle("Bluesteal")
+            .navigationTitle("Blue Steal")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

@@ -22,9 +22,16 @@ struct RelayView: View {
     private var state: RelayState { tunnel.state }
 
     var body: some View {
-        HStack(spacing: 10) {
-            statusBadge
-            Spacer(minLength: 8)
+        // Two-row layout mirroring the Android RelayView: status badge on its
+        // own row, then the state-specific controls below. A single-row HStack
+        // squeezes the hosting state on a phone width — the 11-char token
+        // truncates to "AY…" and the "Cancel" button wraps vertically into
+        // "Can-cel". Splitting fixes both.
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                statusBadge
+                Spacer()
+            }
             controls
         }
         .padding(.horizontal, 12)
@@ -56,10 +63,10 @@ struct RelayView: View {
 
     private var idleControls: some View {
         HStack(spacing: 8) {
+            Spacer()
             Button("Host", action: startTunnelHost)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-            Spacer()
         }
     }
 

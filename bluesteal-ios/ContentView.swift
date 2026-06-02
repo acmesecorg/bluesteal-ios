@@ -13,6 +13,7 @@ struct ContentView: View {
     @Environment(QRRelay.self) private var qrRelay
 
     @State private var showScanner = false
+    @State private var showLogsSheet = false
     @State private var pendingURI: String?   // carried across the cover→sheet handoff
     @State private var scanned: QRItem?
 
@@ -49,21 +50,33 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
+                    // iOS is host-only: it never receives adverts (`AdvertRelay`
+                    // is outbound-only). So there's only a "Local" section — no
+                    // "From peer" like Android's two-section layout.
                     List {
                         ForEach(store.adverts) { AdvertRowView(advert: $0) }
                     }
-                    .listStyle(.insetGrouped)
+                    .listStyle(.plain)
                 }
             }
             .navigationTitle("Bluesteal")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
+                    Button { showLogsSheet = true } label: {
+                        Image(systemName: "doc.text")
+                    }
+                    .accessibilityLabel("Share log files")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button { showScanner = true } label: {
                         Image(systemName: "qrcode.viewfinder")
                     }
                     .accessibilityLabel("Scan QR code")
                 }
+            }
+            .sheet(isPresented: $showLogsSheet) {
+                LogsShareSheet()
             }
             .onAppear {
                 scanner.onEvent = { event in
@@ -99,6 +112,29 @@ struct ContentView: View {
             ReceivedQRView(uri: item.uri)
         }
     }
+}
+
+// MARK: - Logs share sheet
+
+/// Wraps `UIActivityViewController` so the user can AirDrop / Files-export the
+/// JSONL trace files for cross-platform diffing per PORTING_GUIDE §7. Lives
+/// here (next to its toolbar trigger) rather than in RelayView so the relay row
+/// stays parity-clean with the Android layout.
+private struct LogsShareSheet: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let dir = RelayTracer.standardLogDirectory
+        try? FileManager.default.createDirectory(at: dir,
+                                                 withIntermediateDirectories: true)
+        let urls = (try? FileManager.default.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        let items: [Any] = urls.isEmpty ? [dir] : urls
+        return UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }
 
 #Preview {

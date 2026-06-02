@@ -7,6 +7,11 @@
 //  The caBLE tunnel is the only transport; the copyable value is the OOB token
 //  (code-routing) the peer pastes.
 //
+//  Layout mirrors the Android RelayView: a single row with the status badge on
+//  the left and the state-specific controls trailing. The Logs export action
+//  lives on the top toolbar (in ContentView), not here, so the relay row is
+//  reserved for relay actions only.
+//
 
 import SwiftUI
 
@@ -14,26 +19,17 @@ struct RelayView: View {
     @Environment(AdvertRelay.self) private var advertRelay
     @Environment(TunnelTransport.self) private var tunnel
 
-    @State private var showLogsSheet: Bool = false
-
     private var state: RelayState { tunnel.state }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
-                statusBadge
-                Spacer()
-                logsButton
-            }
-
+        HStack(spacing: 10) {
+            statusBadge
+            Spacer(minLength: 8)
             controls
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(.bar)
-        .sheet(isPresented: $showLogsSheet) {
-            LogsShareSheet()
-        }
     }
 
     // MARK: - Sections
@@ -103,6 +99,8 @@ struct RelayView: View {
         HStack(spacing: 12) {
             Text("sent \(tunnel.messagesSent)")
                 .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+            Text("recv \(tunnel.messagesReceived)")
+                .font(.caption).monospacedDigit().foregroundStyle(.secondary)
             Text("hbt \(tunnel.heartbeatCount)")
                 .font(.caption).monospacedDigit().foregroundStyle(.secondary)
             if tunnel.hopNumber > 0 {
@@ -118,19 +116,6 @@ struct RelayView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
         }
-    }
-
-    private var logsButton: some View {
-        Button {
-            showLogsSheet = true
-        } label: {
-            Label("Logs", systemImage: "doc.text")
-                .labelStyle(.iconOnly)
-        }
-        .buttonStyle(.borderless)
-        .controlSize(.small)
-        .foregroundStyle(.secondary)
-        .accessibilityLabel("Share log files")
     }
 
     // MARK: - Status badge
@@ -180,23 +165,3 @@ struct RelayView: View {
     }
 }
 
-// MARK: - Logs share sheet
-
-/// Wraps `UIActivityViewController` so the user can AirDrop / Files-export
-/// the JSONL trace files for cross-platform diffing per PORTING_GUIDE §7.
-private struct LogsShareSheet: UIViewControllerRepresentable {
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        let dir = RelayTracer.standardLogDirectory
-        try? FileManager.default.createDirectory(at: dir,
-                                                 withIntermediateDirectories: true)
-        let urls = (try? FileManager.default.contentsOfDirectory(
-            at: dir,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        )) ?? []
-        let items: [Any] = urls.isEmpty ? [dir] : urls
-        return UIActivityViewController(activityItems: items, applicationActivities: nil)
-    }
-
-    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
-}

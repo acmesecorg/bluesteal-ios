@@ -15,29 +15,47 @@ struct ScannerStatusView: View {
     var onClear: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
+        // Matches the Android ScannerStatusView layout: a single row with the
+        // status badge + compact "· N/M" counter on the leading edge, then the
+        // mode picker (menu-style, not segmented — saves horizontal space on
+        // phone widths) and a trash icon button trailing.
+        HStack(spacing: 8) {
             statusBadge
-            Divider().frame(height: 16)
 
-            Picker("Mode", selection: $mode) {
-                ForEach(ScanMode.allCases) { m in
-                    Text(m.label).tag(m)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 320)
-
-            Divider().frame(height: 16)
-
-            Text("\(uniqueCount) unique  ·  \(totalDetections) total")
+            Text("· \(uniqueCount)/\(totalDetections)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
 
             Spacer()
 
-            Button("Clear", action: onClear)
-                .controlSize(.small)
+            // Plain `Picker(.menu)` lets the trigger text wrap vertically when
+            // the surrounding HStack squeezes it — "Promiscuous" rendered one
+            // character per line on the iPhone 16 Pro. Using `Menu` with an
+            // explicit, `.lineLimit(1).fixedSize()` label sidesteps the
+            // intrinsic-width race entirely and matches the Android TextButton
+            // + tune icon layout.
+            Menu {
+                ForEach(ScanMode.allCases) { m in
+                    Button(m.label) { mode = m }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "slider.horizontal.3")
+                    Text(mode.label)
+                        .lineLimit(1)
+                }
+                .font(.caption)
+                .fixedSize(horizontal: true, vertical: false)
+            }
+            .accessibilityLabel("Scan mode")
+
+            Button(action: onClear) {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .accessibilityLabel("Clear adverts")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

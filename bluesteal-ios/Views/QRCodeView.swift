@@ -49,8 +49,6 @@ struct ScannedResultView: View {
 
     var body: some View {
         VStack(spacing: 18) {
-            Text("Scanned FIDO QR")
-                .font(.headline)
             QRCodeView(uri: uri)
                 .frame(width: 220, height: 220)
             Text(uri)
@@ -64,34 +62,25 @@ struct ScannedResultView: View {
                 Button {
                     onCopy(); copied = true
                 } label: {
-                    Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    Text(copied ? "Copied" : "Copy")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
 
-                if canSend {
-                    Button {
-                        onSend(); dismiss()
-                    } label: {
-                        Label("Send", systemImage: "paperplane.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
+                Button {
+                    onSend(); dismiss()
+                } label: {
+                    Text("Send")
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canSend)
             }
             .padding(.horizontal)
-
-            if !canSend {
-                Text("Connect to a peer (Host or join) to send.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            Button("Done") { dismiss() }
-                .padding(.top, 4)
         }
         .padding()
         .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 }
 
@@ -99,21 +88,19 @@ struct ScannedResultView: View {
 /// the user to scan.
 struct ReceivedQRView: View {
     let uri: String
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 18) {
-            Text("QR from peer")
+            Text("QR Code Received")
                 .font(.headline)
-            Text("Scan this with your phone")
+            Text("Scan with another device")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             QRCodeView(uri: uri)
                 .frame(width: 260, height: 260)
-            Button("Done") { dismiss() }
-                .padding(.top, 4)
         }
         .padding()
         .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 }

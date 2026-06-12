@@ -147,7 +147,7 @@ struct RelayView: View {
         case .idle:                            return "idle"
         case .hosting:                         return "tunnel hosting"
         case .negotiating:                     return "tunnel negotiating"
-        case .open:                            return "tunnel open"
+        case .open:                            return "tunnel open (\(tunnel.tunnelDomain))"
         case .closed(let r):                   return "closed (\(r))"
         }
     }

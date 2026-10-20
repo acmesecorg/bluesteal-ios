@@ -6,6 +6,34 @@
 import SwiftUI
 import UIKit
 
+/// Human-visible build tag shown in the top-left (reads the real bundle version,
+/// bumped via MARKETING_VERSION), so you can glance at two devices and confirm
+/// they're on the same build.
+enum BuildInfo {
+    static let tag = "v" + ((Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "?")
+}
+
+/// Current IPv4 of the active interface (Wi-Fi en0 preferred), shown under the
+/// version so you can see which network the device is on. No permission needed.
+func localIPv4() -> String {
+    var ifaddr: UnsafeMutablePointer<ifaddrs>?
+    guard getifaddrs(&ifaddr) == 0, let first = ifaddr else { return "—" }
+    defer { freeifaddrs(ifaddr) }
+    var fallback: String?
+    for ptr in sequence(first: first, next: { $0.pointee.ifa_next }) {
+        let flags = Int32(ptr.pointee.ifa_flags)
+        guard let sa = ptr.pointee.ifa_addr,
+              (flags & IFF_UP) == IFF_UP, (flags & IFF_LOOPBACK) == 0,
+              sa.pointee.sa_family == UInt8(AF_INET) else { continue }
+        var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+        getnameinfo(sa, socklen_t(sa.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST)
+        let ip = String(cString: host)
+        if String(cString: ptr.pointee.ifa_name) == "en0" { return ip }  // Wi-Fi wins
+        if fallback == nil { fallback = ip }
+    }
+    return fallback ?? "—"
+}
+
 struct ContentView: View {
     @Environment(CableScanner.self) private var scanner
     @Environment(AdvertStore.self) private var store
@@ -16,6 +44,7 @@ struct ContentView: View {
     @State private var showLogsSheet = false
     @State private var pendingURI: String?   // carried across the cover→sheet handoff
     @State private var scanned: QRItem?
+    @State private var ipAddr: String = localIPv4()
 
     /// Send is only meaningful with a connected peer.
     private var canSend: Bool {
@@ -61,6 +90,12 @@ struct ContentView: View {
             }
             .navigationTitle("Blue Steal")
             .navigationBarTitleDisplayMode(.inline)
+            .task {
+                while !Task.isCancelled {
+                    ipAddr = localIPv4()
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showLogsSheet = true } label: {
@@ -83,6 +118,19 @@ struct ContentView: View {
                     store.ingest(event)
                 }
             }
+        }
+        // Build tag + local IP pinned to the literal top-left of the screen,
+        // overlaid on the nav bar's (empty) leading edge — plain text, no pill.
+        .overlay(alignment: .topLeading) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(BuildInfo.tag)
+                Text(ipAddr)
+            }
+            .font(.system(size: 11, weight: .medium, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .padding(.leading, 16)
+            .padding(.top, 8)   // drop it to roughly vertically centre on the inline title
+            .allowsHitTesting(false)
         }
         // Camera scanner (full screen). On a successful scan we stash the URI and
         // dismiss; the result sheet is presented from onDismiss to avoid a

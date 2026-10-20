@@ -20,9 +20,17 @@ struct RendezvousConfig {
     let room: String
     let bearer: String?
 
-    /// Reads config written by the `bluesteal://config` handler. Returns nil
-    /// (rendezvous disabled) when no base URL / room has been configured.
+    /// Baked-in `Secrets` config is preferred (compiled in, survives reinstalls);
+    /// the `bluesteal://config` URL override (UserDefaults) is the fallback.
+    /// Returns nil (rendezvous disabled) when neither is configured.
     static func fromDefaults(_ defaults: UserDefaults = .standard) -> RendezvousConfig? {
+        // Baked-in Secrets (Secrets.swift) — survives reinstalls, no re-scan.
+        if !Secrets.rendezvousBaseURL.isEmpty, !Secrets.rendezvousRoom.isEmpty,
+           let url = URL(string: Secrets.rendezvousBaseURL) {
+            return RendezvousConfig(baseURL: url, room: Secrets.rendezvousRoom,
+                                    bearer: Secrets.rendezvousKey.isEmpty ? nil : Secrets.rendezvousKey)
+        }
+        // Fallback: runtime override from the bluesteal://config URL.
         guard let urlString = defaults.string(forKey: "rv.baseURL"),
               let url = URL(string: urlString),
               let room = defaults.string(forKey: "rv.room"),

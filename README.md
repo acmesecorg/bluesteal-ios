@@ -31,6 +31,25 @@ The hosted token appears as a `token.ready` event in the per-PID JSONL trace
 under `<app-container>/Library/Application Support/bluesteal/Logs/` (use the
 in-app **Logs** share button, or pull via `devicectl … copy from`).
 
+## Rendezvous pairing (two-rooms demo)
+
+To pair with a device in another room without reading a token across, the host
+publishes its current `CODE-ROUTING` token to a small Cloudflare Worker
+("rendezvous") that the peer polls. Deploy your own Worker from the umbrella
+repo's `tools/rendezvous/`, then configure this app **at runtime** — nothing is
+compiled in or committed:
+
+```
+bluesteal://config?rv=<worker-base-url>&room=<room>&k=<bearer>
+```
+
+Open that URL **on the device** via a tappable link (e.g. paste into a Note) or a
+QR of it — Safari's address bar won't launch a custom scheme. It stores
+`rv.baseURL` / `rv.room` / `rv.key` in UserDefaults. Then tap **Host**: the host
+runs a persistent loop that republishes a fresh token on every (re)connect, and
+self-heals on drops. Inbound relayed adverts show up as the `recv` counter and
+`advert.recv` trace events (iOS is host-only, so they aren't re-broadcast).
+
 ## More
 
 Protocol, architecture, OOB-token format, and the shared specs live in the

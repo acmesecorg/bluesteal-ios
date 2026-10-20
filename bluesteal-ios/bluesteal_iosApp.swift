@@ -93,6 +93,19 @@ struct bluesteal_iosApp: App {
     private func handle(url: URL) {
         guard url.scheme?.lowercased() == "bluesteal" else { return }
         switch url.host?.lowercased() {
+        case "config":
+            // Supplies the rendezvous drop at runtime so no URL/bearer is ever
+            // compiled in or committed: bluesteal://config?rv=<baseURL>&room=<room>&k=<bearer>
+            let d = UserDefaults.standard
+            if let rv = Self.queryValue(url, "rv") { d.set(rv, forKey: "rv.baseURL") }
+            if let room = Self.queryValue(url, "room") { d.set(room, forKey: "rv.room") }
+            if let k = Self.queryValue(url, "k") { d.set(k, forKey: "rv.key") }
+            // Log presence only — never the base URL or bearer value.
+            tracer.log("app", "app.openurl.config", [
+                "hasRv": Self.queryValue(url, "rv") != nil,
+                "hasRoom": Self.queryValue(url, "room") != nil,
+                "hasKey": Self.queryValue(url, "k") != nil
+            ])
         case "host":
             tracer.log("app", "app.openurl.host", ["url": url.absoluteString])
             Self.beginHost(tunnel: tunnel, advertRelay: advertRelay)
